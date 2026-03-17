@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mestre da Matemática Pro</title>
+    <style>
+        :root {
+            --primary: #4A90E2;
+            --success: #48BB78;
+            --error: #F56565;
+            --bg: #EDF2F7;
+            --card-back: #2D3748;
+            --text-color: #2D3748;
+            --focus-ring: #63B3ED;
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: var(--bg);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0; padding: 20px;
+            overflow-x: hidden;
+        }
+
+        .stats-container { display: flex; gap: 20px; margin-bottom: 20px; }
+        .stat-box {
+            font-size: 1.1rem; font-weight: bold; background: white;
+            padding: 10px 25px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+
+        .game-container { position: relative; max-width: 600px; width: 100%; }
+        .grid {
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            gap: 12px; perspective: 1000px;
+        }
+
+        .card {
+            width: 100%; aspect-ratio: 1/1; cursor: pointer;
+            position: relative; transform-style: preserve-3d; transition: transform 0.5s;
+            border-radius: 15px; outline: none;
+        }
+
+        /* Destaque para navegação via teclado */
+        .card:focus {
+            box-shadow: 0 0 0 4px var(--focus-ring);
+            transform: scale(1.05);
+        }
+
+        .card.flipped { transform: rotateY(180deg); }
+
+        .card-face {
+            position: absolute; width: 100%; height: 100%;
+            backface-visibility: hidden; display: flex; align-items: center;
+            justify-content: center; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .card-front { background-color: var(--card-back); color: #A0AEC0; }
+        .card-front svg { width: 50%; height: 50%; fill: currentColor; }
+
+        .card-back {
+            background-color: white; color: var(--text-color);
+            transform: rotateY(180deg); font-size: 1.4rem; font-weight: 800;
+        }
+
+        .card.matched .card-back {
+            border: 5px solid var(--success); color: var(--success); background-color: #F0FFF4;
+        }
+
+        #victory-message {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.96); display: none;
+            flex-direction: column; align-items: center; justify-content: center;
+            z-index: 100; border-radius: 15px; text-align: center;
+        }
+
+        .confetti {
+            position: fixed; width: 10px; height: 10px; z-index: 999;
+            animation: fall 3s linear forwards;
+        }
+
+        @keyframes fall { to { transform: translateY(100vh) rotate(360deg); opacity: 0; } }
+
+        button {
+            background: var(--primary); color: white; border: none;
+            padding: 12px 30px; border-radius: 10px; font-weight: bold;
+            cursor: pointer; font-size: 1rem; margin-top: 15px;
+        }
+
+        @media (max-width: 500px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1 style="color: var(--primary)">Mestre da Matemática 🧠</h1>
+        <div class="stats-container">
+            <div class="stat-box">Nível: <span id="level-display">1</span></div>
+            <div class="stat-box">Tempo: <span id="timer">0</span>s</div>
+        </div>
+    </div>
+
+    <div class="game-container">
+        <div class="grid" id="game-grid"></div>
+        
+        <div id="victory-message">
+            <h2 style="color: var(--success); font-size: 2rem; margin: 0;">EXCELENTE! ✨</h2>
+            <p id="victory-stats" style="font-size: 1.2rem; margin: 10px 0;"></p>
+            <button id="btn-next" onclick="gameController.nextLevel()">Próximo Nível (Enter) 🚀</button>
+        </div>
+    </div>
+
+    <button onclick="gameController.resetToFirstLevel()" style="background: #A0AEC0;">Recomeçar do Nível 1</button>
+
+    <script>
+        // Gerador de sons sintéticos (sem arquivos externos)
+        const SoundFX = {
+            ctx: new (window.AudioContext || window.webkitAudioContext)(),
+            play(freq, type, duration) {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + duration);
+            },
+            success() { this.play(587.33, 'sine', 0.3); setTimeout(() => this.play(880, 'sine', 0.4), 100); },
+            error() { this.play(150, 'triangle', 0.4); },
+            flip() { this.play(400, 'sine', 0.05); }
+        };
+
+        const MathGenerator = {
+            generatePairs(level) {
+                const cards = [];
+                const maxNum = 5 + (level * 5); 
+                for (let i = 0; i < 6; i++) {
+                    const isAdd = Math.random() > 0.5;
+                    const a = Math.floor(Math.random() * maxNum) + 1;
+                    const b = Math.floor(Math.random() * maxNum) + 1;
+                    const exp = isAdd ? `${a} + ${b}` : `${Math.max(a,b)} - ${Math.min(a,b)}`;
+                    const res = isAdd ? a + b : Math.max(a,b) - Math.min(a,b);
+                    cards.push(
+                        { content: exp, value: res, type: 'EXP' },
+                        { content: res.toString(), value: res, type: 'NUM' }
+                    );
+                }
+                return cards.sort(() => Math.random() - 0.5);
+            }
+        };
+
+        const gameController = {
+            level: 1, seconds: 0, matched: 0, flipped: [], locked: false, interval: null,
+            focusedIdx: 0,
+
+            init() {
+                clearInterval(this.interval);
+                this.seconds = 0; this.matched = 0; this.flipped = []; this.locked = false; this.focusedIdx = 0;
+                this.cards = MathGenerator.generatePairs(this.level);
+                document.getElementById('level-display').innerText = this.level;
+                document.getElementById('victory-message').style.display = 'none';
+                this.render();
+                this.startTimer();
+                this.setupKeyboard();
+            },
+
+            startTimer() {
+                this.interval = setInterval(() => {
+                    this.seconds++;
+                    document.getElementById('timer').innerText = this.seconds;
+                }, 1000);
+            },
+
+            handleFlip(index, el) {
+                if (this.locked || el.classList.contains('flipped')) return;
+                SoundFX.flip();
+                el.classList.add('flipped');
+                this.flipped.push({ data: this.cards[index], el });
+                if (this.flipped.length === 2) this.check();
+            },
+
+            check() {
+                this.locked = true;
+                const [c1, c2] = this.flipped;
+                const isMatch = (c1.data.type !== c2.data.type) && (c1.data.value === c2.data.value);
+
+                if (isMatch) {
+                    setTimeout(() => SoundFX.success(), 200);
+                    this.flipped.forEach(c => c.el.classList.add('matched'));
+                    this.matched++;
+                    this.flipped = []; this.locked = false;
+                    if (this.matched === 6) this.win();
+                } else {
+                    setTimeout(() => {
+                        SoundFX.error();
+                        this.flipped.forEach(c => c.el.classList.remove('flipped'));
+                        this.flipped = []; this.locked = false;
+                    }, 1000);
+                }
+            },
+
+            win() {
+                clearInterval(this.interval);
+                this.spawnConfetti();
+                document.getElementById('victory-stats').innerText = `Nível ${this.level} em ${this.seconds} segundos!`;
+                setTimeout(() => { 
+                    document.getElementById('victory-message').style.display = 'flex';
+                    document.getElementById('btn-next').focus();
+                }, 600);
+            },
+
+            nextLevel() { this.level++; this.init(); },
+            resetToFirstLevel() { this.level = 1; this.init(); },
+
+            setupKeyboard() {
+                document.onkeydown = (e) => {
+                    const cards = document.querySelectorAll('.card');
+                    const cols = window.innerWidth > 500 ? 4 : 3;
+
+                    if (e.key === 'ArrowRight' && this.focusedIdx < cards.length - 1) this.focusedIdx++;
+                    if (e.key === 'ArrowLeft' && this.focusedIdx > 0) this.focusedIdx--;
+                    if (e.key === 'ArrowDown' && this.focusedIdx + cols < cards.length) this.focusedIdx += cols;
+                    if (e.key === 'ArrowUp' && this.focusedIdx - cols >= 0) this.focusedIdx -= cols;
+                    
+                    if (['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+                        cards[this.focusedIdx].focus();
+                        e.preventDefault();
+                    }
+
+                    if (e.key === ' ' || e.key === 'Enter') {
+                        const active = document.activeElement;
+                        if (active.classList.contains('card')) {
+                            active.click();
+                            e.preventDefault();
+                        }
+                    }
+                };
+            },
+
+            spawnConfetti() {
+                for(let i=0; i<50; i++) {
+                    const c = document.createElement('div');
+                    c.className = 'confetti';
+                    c.style.left = Math.random() * 100 + 'vw';
+                    c.style.backgroundColor = `hsl(${Math.random()*360}, 70%, 60%)`;
+                    c.style.animationDelay = Math.random() * 2 + 's';
+                    document.body.appendChild(c);
+                    setTimeout(() => c.remove(), 4000);
+                }
+            },
+
+            render() {
+                const grid = document.getElementById('game-grid');
+                grid.innerHTML = '';
+                const cardIcon = `<svg viewBox="0 0 24 24"><path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z" /></svg>`;
+                
+                this.cards.forEach((card, i) => {
+                    const div = document.createElement('div');
+                    div.className = 'card';
+                    div.tabIndex = 0; // Torna a carta "focável"
+                    div.innerHTML = `<div class="card-face card-front">${cardIcon}</div><div class="card-face card-back">${card.content}</div>`;
+                    div.onclick = () => this.handleFlip(i, div);
+                    grid.appendChild(div);
+                });
+                grid.firstChild.focus(); // Começa com foco na primeira carta
+            }
+        };
+
+        gameController.init();
+    </script>
+</body>
+</html>
