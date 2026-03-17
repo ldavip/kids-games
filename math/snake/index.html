@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Math Snake - Cobrinha Matemática</title>
+    <style>
+        body {
+            background: #f0f8ff;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+        h1 {
+            margin-top: 24px;
+            color: #2a7a2a;
+            font-size: 6vw;
+            text-align: center;
+        }
+        #game-container {
+            margin-top: 4vw;
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px #aaa;
+            padding: 2vw;
+            max-width: 98vw;
+            width: 420px;
+            min-width: 240px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #canvas {
+            background: #e0ffe0;
+            border: 2px solid #2a7a2a;
+            border-radius: 8px;
+            width: 90vw;
+            max-width: 400px;
+            height: 90vw;
+            max-height: 400px;
+            display: block;
+            touch-action: manipulation;
+        }
+        #info {
+            margin-top: 12px;
+            font-size: 4vw;
+            min-font-size: 16px;
+            text-align: center;
+        }
+        #controls {
+            margin-top: 16px;
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            gap: 2vw;
+        }
+        .btn {
+            background: #2a7a2a;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 2vw 5vw;
+            font-size: 4vw;
+            min-width: 80px;
+            min-height: 40px;
+            cursor: pointer;
+            margin: 0 4px;
+        }
+        .btn:hover {
+            background: #3cb43c;
+        }
+        @media (max-width: 600px) {
+            h1 { font-size: 8vw; }
+            #game-container { width: 98vw; padding: 2vw; }
+            #canvas { width: 98vw; height: 98vw; max-width: 98vw; max-height: 98vw; }
+            #info, .btn { font-size: 5vw; }
+        }
+    </style>
+</head>
+<body>
+    <h1>Math Snake - Cobrinha Matemática</h1>
+    <div id="game-container">
+        <canvas id="canvas" width="400" height="400"></canvas>
+        <div id="info">
+            Nível: <span id="level">1</span> | Ordem: <span id="order">Crescente</span> | Próximo: <span id="next-number">?</span>
+        </div>
+        <div id="controls">
+            <button class="btn" onclick="startGame()">Iniciar</button>
+            <button class="btn" onclick="resetGame()">Resetar</button>
+        </div>
+        <div id="message" style="margin-top:10px;color:#d32f2f;font-weight:bold;display:none;"></div>
+    </div>
+    <script>
+        // Configurações iniciais
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const gridSize = 20;
+        const gridCount = canvas.width / gridSize;
+        let snake, direction, food, numbers, order, nextNumber, level, score, interval, gameOver;
+
+        // Adiciona variáveis para animação
+        let fadeFoods = [];
+        let highlightOrder = false;
+
+        let powerUps = [];
+        let powerUpTypes = [
+            { type: 'grow', color: '#2196f3', icon: '+', effect: function() { snake.push({...snake[snake.length-1]}); } },
+            { type: 'score', color: '#ffd600', icon: '★', effect: function() { score += 2; } },
+            { type: 'slow', color: '#8bc34a', icon: '⏳', effect: function() { clearInterval(interval); interval = setInterval(gameLoop, 200); setTimeout(() => { clearInterval(interval); interval = setInterval(gameLoop, 120); }, 3000); } }
+        ];
+
+        // Variável para bloquear reversão direta
+        let lastDirection = {x: 1, y: 0};
+
+        function startGame() {
+            level = 1;
+            score = 0;
+            order = 'asc'; // 'asc' ou 'desc'
+            snake = [{x: 10, y: 10}];
+            direction = {x: 1, y: 0};
+            numbers = generateNumbers(level);
+            foods = placeFoods(numbers);
+            powerUps = []; // Resetar power-ups
+            gameOver = false;
+            document.getElementById('level').innerText = level;
+            document.getElementById('order').innerText = order === 'asc' ? 'Crescente' : 'Decrescente';
+            document.getElementById('next-number').innerText = getNextNumber(numbers, order);
+            document.getElementById('message').style.display = 'none';
+            clearInterval(interval);
+            interval = setInterval(gameLoop, 120);
+            updateVisualOrder();
+        }
+
+        function resetGame() {
+            clearInterval(interval);
+            startGame();
+        }
+
+        function generateNumbers(lvl) {
+            // Gera 4 ou 5 números aleatórios para as comidas
+            let nums = [];
+            let min = 1;
+            let max = 5 + lvl * 2;
+            let total = Math.floor(Math.random() * 2) + 4; // 4 ou 5
+            while (nums.length < total) {
+                let n = Math.floor(Math.random() * (max - min + 1)) + min;
+                if (!nums.includes(n)) nums.push(n);
+            }
+            return nums;
+        }
+
+        function getNextNumber(nums, ord) {
+            if (ord === 'asc') {
+                return Math.min(...nums);
+            } else {
+                return Math.max(...nums);
+            }
+        }
+
+        function placeFoods(nums) {
+            // Coloca todas as comidas (números) no tabuleiro
+            let placed = [];
+            nums.forEach(n => {
+                let pos;
+                do {
+                    pos = {
+                        x: Math.floor(Math.random() * gridCount),
+                        y: Math.floor(Math.random() * gridCount)
+                    };
+                } while (
+                    snake.some(s => s.x === pos.x && s.y === pos.y) ||
+                    placed.some(f => f.x === pos.x && f.y === pos.y)
+                );
+                placed.push({x: pos.x, y: pos.y, value: n});
+            });
+            return placed;
+        }
+
+        function maybeSpawnPowerUp() {
+            if (Math.random() < 0.25 && powerUps.length === 0 && foods.length > 0) { // 25% chance após comer comida, só se ainda houver comidas
+                let type = powerUpTypes[Math.floor(Math.random() * powerUpTypes.length)];
+                let pos;
+                do {
+                    pos = {
+                        x: Math.floor(Math.random() * gridCount),
+                        y: Math.floor(Math.random() * gridCount)
+                    };
+                } while (
+                    snake.some(s => s.x === pos.x && s.y === pos.y) ||
+                    foods.some(f => f.x === pos.x && f.y === pos.y) ||
+                    powerUps.some(p => p.x === pos.x && p.y === pos.y)
+                );
+                powerUps.push({ ...pos, ...type });
+            }
+        }
+
+        function gameLoop() {
+            if (gameOver) return;
+            // Move a cobrinha
+            const head = {x: snake[0].x + direction.x, y: snake[0].y + direction.y};
+            lastDirection = {...direction};
+            // Verifica colisão com paredes
+            if (head.x < 0 || head.x >= gridCount || head.y < 0 || head.y >= gridCount) {
+                endGame('Você bateu na parede!');
+                return;
+            }
+            // Verifica colisão com si mesma
+            if (snake.some(s => s.x === head.x && s.y === head.y)) {
+                endGame('Você bateu em si mesmo!');
+                return;
+            }
+            snake.unshift(head);
+            // Verifica se comeu alguma comida
+            let eatenIdx = foods.findIndex(f => f.x === head.x && f.y === head.y);
+            if (eatenIdx !== -1) {
+                let eaten = foods[eatenIdx];
+                let expected = getNextNumber(numbers, order);
+                if (eaten.value === expected) {
+                    score++;
+                    numbers = numbers.filter(n => n !== eaten.value);
+                    // Animação de fade na comida comida
+                    fadeFoods.push({...eaten, alpha: 1});
+                    foods.splice(eatenIdx, 1);
+                    maybeSpawnPowerUp();
+                    if (numbers.length === 0) {
+                        level++;
+                        order = (level % 2 === 0) ? 'desc' : 'asc';
+                        numbers = generateNumbers(level);
+                        foods = placeFoods(numbers);
+                        updateVisualOrder();
+                    }
+                    document.getElementById('level').innerText = level;
+                    document.getElementById('order').innerText = order === 'asc' ? 'Crescente' : 'Decrescente';
+                    document.getElementById('next-number').innerText = getNextNumber(numbers, order);
+                } else {
+                    endGame('Você comeu o número errado!');
+                    return;
+                }
+            } else {
+                snake.pop();
+            }
+            // Checa colisão com power-up
+            let puIdx = powerUps.findIndex(p => p.x === snake[0].x && p.y === snake[0].y);
+            if (puIdx !== -1) {
+                let pu = powerUps[puIdx];
+                pu.effect();
+                powerUps.splice(puIdx, 1);
+            }
+            draw();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Efeito de destaque ao trocar ordem
+            if (highlightOrder) {
+                ctx.save();
+                ctx.globalAlpha = 0.25;
+                ctx.fillStyle = (order === 'asc') ? '#aaffaa' : '#ffaaaa';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.restore();
+            }
+            // Linha divisória
+            ctx.save();
+            ctx.strokeStyle = '#bbb';
+            ctx.setLineDash([6, 6]);
+            ctx.beginPath();
+            ctx.moveTo(canvas.width/2, 0);
+            ctx.lineTo(canvas.width/2, canvas.height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+            // Desenha power-ups
+            (powerUps || []).forEach(p => {
+                ctx.save();
+                ctx.globalAlpha = 0.9;
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 16;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x * gridSize + gridSize/2, p.y * gridSize + gridSize/2, gridSize/2.2, 0, 2*Math.PI);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 20px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(p.icon, p.x * gridSize + gridSize/2, p.y * gridSize + gridSize/2);
+                ctx.restore();
+            });
+            // Desenha todas as comidas
+            (foods || []).forEach(f => {
+                ctx.save();
+                ctx.shadowColor = (order === 'asc') ? '#ff9800' : '#d32f2f';
+                ctx.shadowBlur = 12;
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = (order === 'asc') ? '#ff9800' : '#d32f2f';
+                ctx.fillStyle = (order === 'asc') ? '#fffbe7' : '#ffeaea';
+                ctx.beginPath();
+                ctx.rect(f.x * gridSize, f.y * gridSize, gridSize, gridSize);
+                ctx.fill();
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = (order === 'asc') ? '#ff9800' : '#d32f2f';
+                ctx.font = 'bold 18px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(f.value, f.x * gridSize + gridSize/2, f.y * gridSize + gridSize/2);
+                ctx.restore();
+            });
+            // Animação de fade das comidas comidas
+            fadeFoods.forEach((f, idx) => {
+                ctx.save();
+                ctx.globalAlpha = f.alpha;
+                ctx.shadowColor = (order === 'asc') ? '#ff9800' : '#d32f2f';
+                ctx.shadowBlur = 12;
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = (order === 'asc') ? '#ff9800' : '#d32f2f';
+                ctx.fillStyle = (order === 'asc') ? '#fffbe7' : '#ffeaea';
+                ctx.beginPath();
+                ctx.rect(f.x * gridSize, f.y * gridSize, gridSize, gridSize);
+                ctx.fill();
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = (order === 'asc') ? '#ff9800' : '#d32f2f';
+                ctx.font = 'bold 18px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(f.value, f.x * gridSize + gridSize/2, f.y * gridSize + gridSize/2);
+                ctx.restore();
+                f.alpha -= 0.08;
+                if (f.alpha <= 0) fadeFoods.splice(idx, 1);
+            });
+            // Desenha a cobrinha com gradiente
+            snake.forEach((s, i) => {
+                let grad = ctx.createLinearGradient(s.x * gridSize, s.y * gridSize, (s.x+1) * gridSize, (s.y+1) * gridSize);
+                if (i === 0) {
+                    grad.addColorStop(0, '#2a7a2a');
+                    grad.addColorStop(1, '#4caf50');
+                } else {
+                    grad.addColorStop(0, '#4caf50');
+                    grad.addColorStop(1, '#a5d6a7');
+                }
+                ctx.fillStyle = grad;
+                ctx.fillRect(s.x * gridSize, s.y * gridSize, gridSize, gridSize);
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(s.x * gridSize, s.y * gridSize, gridSize, gridSize);
+            });
+        }
+
+        function endGame(msg) {
+            gameOver = true;
+            clearInterval(interval);
+            document.getElementById('message').innerText = msg;
+            document.getElementById('message').style.display = 'block';
+        }
+
+        // Controle por teclado
+        document.addEventListener('keydown', function(e) {
+            if (gameOver) return;
+            switch(e.key) {
+                case 'ArrowUp':
+                    if (direction.y !== 1) direction = {x: 0, y: -1};
+                    break;
+                case 'ArrowDown':
+                    if (direction.y !== -1) direction = {x: 0, y: 1};
+                    break;
+                case 'ArrowLeft':
+                    if (direction.x !== 1) direction = {x: -1, y: 0};
+                    break;
+                case 'ArrowRight':
+                    if (direction.x !== -1) direction = {x: 1, y: 0};
+                    break;
+            }
+        });
+
+        // Função para girar direção
+        function turnSnake(clockwise) {
+            // Direções: cima, direita, baixo, esquerda
+            const dirs = [
+                {x: 0, y: -1}, // cima
+                {x: 1, y: 0},  // direita
+                {x: 0, y: 1},  // baixo
+                {x: -1, y: 0}  // esquerda
+            ];
+            let idx = dirs.findIndex(d => d.x === direction.x && d.y === direction.y);
+            let newIdx = clockwise ? (idx + 1) % 4 : (idx + 3) % 4;
+            let newDir = {...dirs[newIdx]};
+            // Bloqueia reversão direta
+            if (snake.length > 1 && newDir.x === -lastDirection.x && newDir.y === -lastDirection.y) {
+                return;
+            }
+            direction = newDir;
+        }
+
+        // Adiciona evento de clique no canvas
+        canvas.addEventListener('click', function(e) {
+            if (gameOver) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            if (x > canvas.width / 2) {
+                // Direita: sentido horário
+                turnSnake(true);
+            } else {
+                // Esquerda: sentido anti-horário
+                turnSnake(false);
+            }
+        });
+    </script>
+</body>
+</html>
